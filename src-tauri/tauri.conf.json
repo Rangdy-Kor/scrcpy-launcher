@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "scrcpy-launcher",
+  "productName": "Scrcpy Launcher",
   "version": "0.1.0",
-  "identifier": "io.github.rangdy_kor.scrcpy-launcher",
+  "identifier": "io.github.rangdy-kor.scrcpy-launcher",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "scrcpy-launcher",
+        "title": "Scrcpy Launcher",
         "width": 800,
         "height": 600
       }
