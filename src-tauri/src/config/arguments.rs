@@ -3,6 +3,15 @@ use super::{LauncherError, ScrcpyConfig};
 /// Pure builder shared by preview and launch. No OS access or shell syntax.
 pub fn build_arguments(config: &ScrcpyConfig) -> Result<Vec<String>, LauncherError> {
     let mut args = Vec::new();
+    if let Some(serial) = &config.device.serial {
+        if serial.trim().is_empty() || serial.chars().any(char::is_control) {
+            return Err(LauncherError::new(
+                "invalid_config",
+                "Device serial must be nonempty and contain no control characters.",
+            ));
+        }
+        args.push(format!("--serial={serial}"));
+    }
     if let Some(codec) = config.video.codec {
         args.push(format!("--video-codec={}", codec.as_str()));
     }
@@ -45,6 +54,57 @@ mod tests {
 
     fn args(value: serde_json::Value) -> Vec<String> {
         build_arguments(&serde_json::from_value(value).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn unselected_device_adds_no_argument() {
+        assert!(args(json!({"device":{"serial":null}})).is_empty());
+    }
+    #[test]
+    fn serial_selection() {
+        assert_eq!(
+            args(json!({"device":{"serial":"192.168.1.188:42999"}})),
+            ["--serial=192.168.1.188:42999"]
+        );
+    }
+    #[test]
+    fn serial_combined_with_existing_options() {
+        assert_eq!(
+            args(
+                json!({"device":{"serial":"adb-example._adb-tls-connect._tcp"},
+            "video":{"codec":"h265","bitrateMbps":20,"maxFps":60},"audio":{"enabled":false},"input":{"keyboard":"uhid","mouse":"uhid"}})
+            ),
+            [
+                "--serial=adb-example._adb-tls-connect._tcp",
+                "--video-codec=h265",
+                "--video-bit-rate=20M",
+                "--max-fps=60",
+                "--no-audio",
+                "--keyboard=uhid",
+                "--mouse=uhid"
+            ]
+        );
+    }
+    #[test]
+    fn serial_is_one_literal_argument() {
+        let serial = r#"serial with spaces; & $(command) "quote" --no-video"#;
+        assert_eq!(
+            args(json!({"device":{"serial":serial}})),
+            [format!("--serial={serial}")]
+        );
+    }
+    #[test]
+    fn invalid_serial_format() {
+        for serial in ["", "  ", "abc\nxyz", "abc\0xyz"] {
+            assert_eq!(
+                build_arguments(
+                    &serde_json::from_value(json!({"device":{"serial":serial}})).unwrap()
+                )
+                .unwrap_err()
+                .code,
+                "invalid_config"
+            );
+        }
     }
 
     #[test]

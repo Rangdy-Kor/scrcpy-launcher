@@ -23,7 +23,18 @@ button { cursor: pointer; }
 button:disabled { opacity: 0.55; cursor: default; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #396cd8; outline-offset: 2px; }
 .launch { background: #396cd8; color: white; min-width: 140px; }
-pre, code { overflow-wrap: anywhere; white-space: pre-wrap; font-size: 13px; }
+pre, code {
+  font-family: "Cascadia Mono", Consolas, "SFMono-Regular", Menlo, Monaco, "Liberation Mono", monospace;
+  font-variant-ligatures: none;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-size: 13px;
+}
+.device-list { list-style: none; padding: 0; margin: 12px 0 0; }
+.device-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; border-top: 1px solid #d5dae3; padding: 10px 0; }
+.device-list small { color: #556175; }
+.device-ready { color: #16703c; }
+.device-unavailable { color: #bd3232; }
 pre { margin: 0; line-height: 1.6; }
 .hint { color: #556175; font-size: 13px; }
 .error { border-left: 3px solid #bd3232; background: #fff0f0; padding: 12px; margin: 12px 0; }
@@ -33,6 +44,9 @@ pre { margin: 0; line-height: 1.6; }
   :root { color: #f1f4f9; background: #222732; }
   .panel, fieldset, input, select, button { background: #2c3341; border-color: #515b70; }
   .hint { color: #b6c1d5; }
+  .device-list small { color: #b6c1d5; }
+  .device-ready { color: #8ee0a6; }
+  .device-unavailable { color: #ffb3b3; }
   .launch { background: #396cd8; }
   .error { background: #442d33; }
 }

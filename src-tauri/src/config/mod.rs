@@ -5,9 +5,16 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScrcpyConfig {
+    pub device: DeviceConfig,
     pub video: VideoConfig,
     pub audio: AudioConfig,
     pub input: InputConfig,
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DeviceConfig {
+    pub serial: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]

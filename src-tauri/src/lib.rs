@@ -1,6 +1,7 @@
 mod commands;
 mod config;
 mod process;
+mod scrcpy;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -10,6 +11,7 @@ pub fn run() {
             commands::scrcpy::get_scrcpy_status,
             commands::scrcpy::preview_scrcpy,
             commands::scrcpy::launch_scrcpy,
+            commands::adb::get_adb_devices,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

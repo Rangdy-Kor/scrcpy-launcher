@@ -1,13 +1,11 @@
-import { useEffect, useState } from "react";
-import { getScrcpyStatus, launchScrcpy, previewScrcpy, toLauncherError } from "./lib/tauri";
+import { useEffect, useRef, useState } from "react";
+import { getAdbDevices, getScrcpyStatus, launchScrcpy, previewScrcpy, toLauncherError } from "./lib/tauri";
+import { DevicePanel } from "./components/DevicePanel";
+import { ErrorMessage } from "./components/ErrorMessage";
+import type { AdbStatus } from "./types/device";
 import { useScrcpyConfig } from "./store/config";
 import type { CommandPreview, InputMode, LauncherError, ScrcpyConfig, ScrcpyStatus, VideoCodec } from "./types/scrcpy";
 import "./App.css";
-
-function ErrorMessage({ error }: { error: LauncherError }) {
-  return <div className="error" role="alert"><strong>{error.message}</strong>
-    <small>{error.code}</small>{error.details && <pre>{error.details}</pre>}</div>;
-}
 
 function App() {
   const [config, setConfig] = useScrcpyConfig();
@@ -19,6 +17,38 @@ function App() {
   const [launchError, setLaunchError] = useState<LauncherError | null>(null);
   const [launchMessage, setLaunchMessage] = useState("");
   const [launching, setLaunching] = useState(false);
+  const [adbStatus, setAdbStatus] = useState<AdbStatus | null>(null);
+  const [adbError, setAdbError] = useState<LauncherError | null>(null);
+  const [refreshingDevices, setRefreshingDevices] = useState(true);
+  const deviceRequestId = useRef(0);
+
+  async function refreshDevices() {
+    const requestId = ++deviceRequestId.current;
+    setRefreshingDevices(true);
+    setAdbError(null);
+    try {
+      const status = await getAdbDevices();
+      if (requestId !== deviceRequestId.current) return;
+      setAdbStatus(status);
+      if (!status.error) {
+        const usable = status.devices.filter((device) => device.state === "device");
+        setConfig((previous) => {
+          const selected = previous.device.serial;
+          if (selected && usable.some((device) => device.serial === selected)) return previous;
+          // Preserve ready selections. A vanished/blocked selection is cleared,
+          // never silently switched to a different device by a refresh.
+          const serial = selected ? null : usable.length === 1 ? usable[0].serial : null;
+          return serial === selected ? previous : { ...previous, device: { serial } };
+        });
+      }
+    } catch (error) {
+      if (requestId !== deviceRequestId.current) return;
+      setAdbStatus(null);
+      setAdbError(toLauncherError(error));
+    } finally {
+      if (requestId === deviceRequestId.current) setRefreshingDevices(false);
+    }
+  }
 
   async function refreshStatus() {
     setChecking(true);
@@ -29,6 +59,7 @@ function App() {
   }
 
   useEffect(() => { void refreshStatus(); }, []);
+  useEffect(() => { void refreshDevices(); }, []);
   useEffect(() => {
     let cancelled = false;
     setPreviewError(null);
@@ -42,12 +73,16 @@ function App() {
   }, [config]);
 
   const currentPreview = preview?.config === config ? preview.value : null;
+  const selectedDeviceReady = !!config.device.serial &&
+    adbStatus?.devices.some((device) => device.serial === config.device.serial && device.state === "device");
+  const canLaunch = !launching && !checking && !refreshingDevices && !!status?.installed &&
+    !!adbStatus?.installed && !adbStatus.error && !adbError && selectedDeviceReady && !!currentPreview && !previewError;
 
   async function launch() {
-    if (!currentPreview || launching) return;
+    if (!canLaunch) return;
     setLaunching(true);
     setLaunchError(null);
-    setLaunchMessage("scrcpy 실행 중입니다. 종료하면 결과가 표시됩니다.");
+    setLaunchMessage("Device 상태 확인 및 scrcpy 실행 중입니다. 종료하면 결과가 표시됩니다.");
     try {
       const result = await launchScrcpy(config);
       setLaunchMessage(`scrcpy가 정상 종료되었습니다 (exit ${result.exitCode ?? "unknown"}).`);
@@ -69,12 +104,16 @@ function App() {
     <section aria-labelledby="status-title" className="panel">
       <div className="row"><h2 id="status-title">scrcpy 상태</h2>
         <button disabled={checking || launching} onClick={() => void refreshStatus()}>{checking ? "확인 중…" : "다시 확인"}</button></div>
-      {status && <><p>{status.installed ? status.version ?? "설치 감지됨 · 버전 확인 불가" : "PATH에서 scrcpy를 찾을 수 없습니다."}</p>
+      {status && <><p>{status.installed ? status.version ? `scrcpy ${status.version.raw}` : "설치 감지됨 · 버전 확인 불가" : "PATH에서 scrcpy를 찾을 수 없습니다."}</p>
         {status.executable && <code>{status.executable}</code>}
         {!status.installed && <p>공식 scrcpy를 설치하고 PATH에 추가한 뒤 앱을 다시 시작하세요.</p>}
         {status.error && <ErrorMessage error={status.error} />}</>}
+      {status?.installed && !status.version && status.versionOutput && <pre>{status.versionOutput}</pre>}
       {statusError && <ErrorMessage error={statusError} />}
     </section>
+    <DevicePanel status={adbStatus} error={adbError} refreshing={refreshingDevices} launching={launching}
+      selectedSerial={config.device.serial} onRefresh={() => void refreshDevices()}
+      onSelect={(serial) => setConfig((previous) => ({ ...previous, device: { serial } }))} />
     <p className="hint">기본값은 공식 scrcpy에 맡깁니다. 빈 숫자 입력은 옵션을 생략합니다.</p>
     <div className="settings">
       <fieldset disabled={launching}><legend>Video</legend>
@@ -100,7 +139,7 @@ function App() {
       <p className="hint">Rust가 생성한 표시용 preview입니다. 실행은 executable과 arguments 배열을 직접 사용합니다.</p>
       {previewError && <ErrorMessage error={previewError} />}
     </section>
-    <button className="launch" disabled={launching || checking || !status?.installed || !currentPreview || !!previewError} onClick={() => void launch()}>{launching ? "실행 중…" : "Launch"}</button>
+    <button className="launch" disabled={!canLaunch} onClick={() => void launch()}>{launching ? "실행 중…" : "Launch"}</button>
     <p role="status">{launchMessage}</p>
     {launchError && <ErrorMessage error={launchError} />}
   </main>;
