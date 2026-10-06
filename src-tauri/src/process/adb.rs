@@ -163,6 +163,7 @@ pub(crate) fn query_devices(executable: &Path) -> Result<Vec<AdbDevice>, Launche
 pub struct AdbStatus {
     pub installed: bool,
     pub executable: Option<String>,
+    pub display_executable: Option<String>,
     pub source: Option<AdbSource>,
     pub devices: Vec<AdbDevice>,
     pub error: Option<LauncherError>,
@@ -179,6 +180,7 @@ pub fn status() -> AdbStatus {
             AdbStatus {
                 installed: true,
                 executable: Some(executable.path.to_string_lossy().into_owned()),
+                display_executable: Some(super::paths::display_path(&executable.path)),
                 source: Some(executable.source),
                 devices,
                 error,
@@ -187,6 +189,7 @@ pub fn status() -> AdbStatus {
         Err(error) => AdbStatus {
             installed: false,
             executable: None,
+            display_executable: None,
             source: None,
             devices: Vec::new(),
             error: Some(error),

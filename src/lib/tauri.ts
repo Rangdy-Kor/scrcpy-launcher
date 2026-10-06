@@ -1,10 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { AdbStatus } from "../types/device";
-import type { CommandPreview, LauncherError, LaunchResult, ScrcpyConfig, ScrcpyStatus } from "../types/scrcpy";
+import type { ConfigPreview, LauncherError, LaunchResult, ScrcpyConfig, ScrcpyStatus } from "../types/scrcpy";
 
 export const getScrcpyStatus = () => invoke<ScrcpyStatus>("get_scrcpy_status");
 export const getAdbDevices = () => invoke<AdbStatus>("get_adb_devices");
-export const previewScrcpy = (config: ScrcpyConfig) => invoke<CommandPreview>("preview_scrcpy", { config });
+export const previewScrcpy = (config: ScrcpyConfig) => invoke<ConfigPreview>("preview_scrcpy", { config });
 export const launchScrcpy = (config: ScrcpyConfig) => invoke<LaunchResult>("launch_scrcpy", { config });
 
 export function toLauncherError(error: unknown): LauncherError {

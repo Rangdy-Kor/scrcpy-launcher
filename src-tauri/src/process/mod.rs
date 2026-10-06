@@ -1,4 +1,5 @@
 pub mod adb;
+pub(crate) mod paths;
 pub mod scrcpy;
 
 use std::{

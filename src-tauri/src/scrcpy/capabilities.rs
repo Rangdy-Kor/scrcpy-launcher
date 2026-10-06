@@ -27,14 +27,18 @@ pub fn requires_version(
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScrcpyCapabilities {
-    /// --hwdec was introduced in official v5.0. No GUI control yet.
+    /// --hwdec was introduced in official v5.0.
     pub hardware_decoding: CapabilitySupport,
+    /// Conservative verified baseline for Product UI additions (not their
+    /// historical introduction version). Existing Foundation options stay usable.
+    pub expanded_options: CapabilitySupport,
 }
 
 impl ScrcpyCapabilities {
     pub fn from_version(version: Option<&ScrcpyVersion>) -> Self {
         Self {
             hardware_decoding: requires_version(version, (5, 0, 0)),
+            expanded_options: requires_version(version, (4, 1, 0)),
         }
     }
 }

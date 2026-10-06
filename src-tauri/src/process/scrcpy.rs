@@ -1,4 +1,7 @@
 use super::{adb, find_executable, native_command};
+use crate::config::availability::{
+    availability, validate_runtime_arguments, ConfigAvailability, HostPlatform,
+};
 use crate::config::{arguments::build_arguments, LauncherError, ScrcpyConfig};
 use crate::scrcpy::{
     capabilities::ScrcpyCapabilities,
@@ -7,7 +10,7 @@ use crate::scrcpy::{
 use serde::Serialize;
 use std::{
     path::Path,
-    process::{Child, Stdio},
+    process::{Child, Command, Stdio},
 };
 
 #[derive(Debug, Serialize)]
@@ -15,6 +18,7 @@ use std::{
 pub struct ScrcpyStatus {
     pub installed: bool,
     pub executable: Option<String>,
+    pub display_executable: Option<String>,
     pub version: Option<ScrcpyVersion>,
     pub version_output: Option<String>,
     pub capabilities: ScrcpyCapabilities,
@@ -25,6 +29,7 @@ pub struct ScrcpyStatus {
 #[serde(rename_all = "camelCase")]
 pub struct CommandPreview {
     pub executable: String,
+    pub display_executable: String,
     pub arguments: Vec<String>,
     pub display: String,
 }
@@ -34,6 +39,7 @@ pub fn status() -> ScrcpyStatus {
         return ScrcpyStatus {
             installed: false,
             executable: None,
+            display_executable: None,
             version: None,
             version_output: None,
             capabilities: ScrcpyCapabilities::from_version(None),
@@ -43,6 +49,7 @@ pub fn status() -> ScrcpyStatus {
     let mut status = ScrcpyStatus {
         installed: true,
         executable: Some(executable.to_string_lossy().into()),
+        display_executable: Some(super::paths::display_path(&executable)),
         version: None,
         version_output: None,
         capabilities: ScrcpyCapabilities::from_version(None),
@@ -81,13 +88,15 @@ pub fn status() -> ScrcpyStatus {
 
 fn make_preview(executable: String, arguments: Vec<String>) -> CommandPreview {
     // Display only: execution uses the original executable and argument vector.
-    let label = display_token(&executable);
+    let display_executable = super::paths::display_path(Path::new(&executable));
+    let label = display_token(&display_executable);
     let display = std::iter::once(label)
         .chain(arguments.iter().map(|argument| display_token(argument)))
         .collect::<Vec<_>>()
         .join(" ");
     CommandPreview {
         executable,
+        display_executable,
         arguments,
         display,
     }
@@ -114,6 +123,36 @@ pub fn preview(config: &ScrcpyConfig) -> Result<CommandPreview, LauncherError> {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ConfigPreview {
+    pub command: Option<CommandPreview>,
+    pub availability: ConfigAvailability,
+    pub error: Option<LauncherError>,
+}
+
+pub fn inspect_config(config: &ScrcpyConfig) -> ConfigPreview {
+    let status = status();
+    let platform = HostPlatform::current();
+    let availability = availability(config, &status.capabilities, platform);
+    let result = preview(config).and_then(|command| {
+        validate_runtime_arguments(&command.arguments, &status.capabilities, platform)?;
+        Ok(command)
+    });
+    match result {
+        Ok(command) => ConfigPreview {
+            command: Some(command),
+            availability,
+            error: None,
+        },
+        Err(error) => ConfigPreview {
+            command: None,
+            availability,
+            error: Some(error),
+        },
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LaunchResult {
     pub command: CommandPreview,
     pub exit_code: Option<i32>,
@@ -129,6 +168,8 @@ pub fn launch(config: &ScrcpyConfig) -> Result<LaunchResult, LauncherError> {
             "scrcpy was not found in PATH. Install official scrcpy and restart the launcher.",
         )
     })?;
+    let status = status();
+    validate_runtime_arguments(&arguments, &status.capabilities, HostPlatform::current())?;
     let adb = adb::discover(Some(&executable))?;
     let devices = adb::query_devices(&adb.path)?;
     adb::validate_selection(config.device.serial.as_deref(), &devices)?;
@@ -165,18 +206,24 @@ fn spawn_scrcpy(
     adb: &Path,
     arguments: &[String],
 ) -> Result<Child, LauncherError> {
-    native_command(executable)
-        .args(arguments)
-        .env("ADB", adb)
-        // Config is the device-selection authority, not an inherited serial.
-        .env_remove("ANDROID_SERIAL")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+    scrcpy_command(executable, adb, arguments)
         .spawn()
         .map_err(|error| {
             LauncherError::new("spawn_failed", "Could not start scrcpy.")
                 .with_details(error.to_string())
         })
+}
+
+fn scrcpy_command(executable: &Path, adb: &Path, arguments: &[String]) -> Command {
+    let mut command = native_command(executable);
+    command
+        .args(arguments)
+        .env("ADB", adb)
+        // Config is the device-selection authority, not an inherited serial.
+        .env_remove("ANDROID_SERIAL")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command
 }
 
 #[cfg(test)]
@@ -192,6 +239,33 @@ mod tests {
             preview(&config).unwrap().arguments,
             build_arguments(&config).unwrap()
         );
+    }
+    #[test]
+    fn expanded_preview_is_the_same_vector_passed_to_spawn() {
+        let config = serde_json::from_str(r#"{"device":{"serial":"adb-example._adb-tls-connect._tcp"},
+            "video":{"maxSize":1920,"codecOptions":[{"key":"quality","type":"int","value":"70"}]},
+            "audio":{"codec":"aac"},"display":{"windowTitle":"Galaxy & desktop"},"input":{"textInjection":"raw"}}"#).unwrap();
+        let arguments = build_arguments(&config).unwrap();
+        let command = preview(&config).unwrap();
+        assert_eq!(command.arguments, arguments);
+        let process = scrcpy_command(Path::new(&command.executable), Path::new("adb"), &arguments);
+        assert_eq!(
+            process.get_args().collect::<Vec<_>>(),
+            command
+                .arguments
+                .iter()
+                .map(std::ffi::OsStr::new)
+                .collect::<Vec<_>>()
+        );
+        assert!(command
+            .display
+            .contains("\"--window-title=Galaxy & desktop\""));
+        let environment = process.get_envs().collect::<Vec<_>>();
+        assert!(environment.contains(&(
+            std::ffi::OsStr::new("ADB"),
+            Some(std::ffi::OsStr::new("adb"))
+        )));
+        assert!(environment.contains(&(std::ffi::OsStr::new("ANDROID_SERIAL"), None)));
     }
     #[test]
     fn display_quotes_executable_without_changing_arguments() {
@@ -250,6 +324,13 @@ mod tests {
         let adb = adb::status();
         println!("adb status: {}", serde_json::to_string(&adb).unwrap());
         assert!(adb.installed && adb.error.is_none());
+        assert_eq!(
+            scrcpy.display_executable.as_deref(),
+            Some(
+                super::super::paths::display_path(Path::new(scrcpy.executable.as_ref().unwrap()))
+                    .as_str()
+            )
+        );
         for device in &adb.devices {
             if device.state == "device" {
                 let config: ScrcpyConfig =
@@ -268,5 +349,52 @@ mod tests {
                 "device_selection_required"
             );
         }
+    }
+
+    #[test]
+    #[ignore = "requires installed scrcpy >=4.1; checks --help parsing, never starts mirroring"]
+    fn live_expanded_cli_smoke() {
+        let runtime = status();
+        assert!(runtime.installed);
+        assert_eq!(
+            runtime.capabilities.expanded_options,
+            crate::scrcpy::capabilities::CapabilitySupport::Supported
+        );
+        let executable = runtime.executable.unwrap();
+        let mut config: ScrcpyConfig = serde_json::from_str(r#"{
+            "device":{"serial":"adb-cli-parser-smoke._adb-tls-connect._tcp"},
+            "video":{"codec":"vp9","bitrateMbps":20,"maxFps":60,"maxSize":1600,"displayId":0,
+                "encoder":"c2.android.vp9.encoder","bufferMs":50,"captureOrientation":{"orientation":"flip90","locked":true},
+                "downsizeOnError":false,"codecOptions":[{"key":"quality","type":"int","value":"80"}]},
+            "audio":{"source":"playback","codec":"aac","bitrateKbps":192,"encoder":"c2.android.aac.encoder",
+                "bufferMs":80,"outputBufferMs":20,"duplication":true,"requireAudio":true,
+                "codecOptions":[{"key":"aac-profile","type":"int","value":"2"}]},
+            "display":{"fullscreen":true,"alwaysOnTop":true,"windowTitle":"CLI parser smoke & title","windowX":-100,
+                "windowY":100,"windowWidth":800,"windowHeight":600,"borderless":true,"orientation":"90",
+                "renderFit":"stretched","aspectRatioLock":false,"disableScreensaver":true,
+                "turnScreenOff":true,"stayAwake":true,"powerOffOnClose":true,"powerOn":false},
+            "input":{"keyboard":"sdk","mouse":"sdk","textInjection":"text","keyRepeat":false,
+                "mouseHover":false,"clipboardAutosync":false,"showTouches":true,"shortcutModifiers":["lalt","rsuper"]}
+        }"#).unwrap();
+        if runtime.capabilities.hardware_decoding
+            == crate::scrcpy::capabilities::CapabilitySupport::Supported
+        {
+            config.video.hardware_decoding = Some(crate::config::HardwareDecoding::Disabled);
+        }
+        let arguments = build_arguments(&config).unwrap();
+        validate_runtime_arguments(&arguments, &runtime.capabilities, HostPlatform::current())
+            .unwrap();
+        let output = native_command(Path::new(&executable))
+            .args(&arguments)
+            .arg("--help")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("--video-codec"));
+        println!("Official installed CLI accepted {} generated arguments with --help; no device was contacted.", arguments.len());
     }
 }

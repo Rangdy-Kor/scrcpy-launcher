@@ -16,6 +16,7 @@ export interface AdbDevice {
 export interface AdbStatus {
   installed: boolean;
   executable: string | null;
+  displayExecutable: string | null;
   source: "path" | "scrcpyDirectory" | null;
   devices: AdbDevice[];
   error: LauncherError | null;

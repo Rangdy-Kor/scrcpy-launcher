@@ -1,6 +1,6 @@
 use crate::{
     config::{LauncherError, ScrcpyConfig},
-    process::scrcpy::{self, CommandPreview, LaunchResult, ScrcpyStatus},
+    process::scrcpy::{self, ConfigPreview, LaunchResult, ScrcpyStatus},
 };
 
 #[tauri::command]
@@ -14,13 +14,13 @@ pub async fn get_scrcpy_status() -> Result<ScrcpyStatus, LauncherError> {
 }
 
 #[tauri::command]
-pub async fn preview_scrcpy(config: ScrcpyConfig) -> Result<CommandPreview, LauncherError> {
-    tauri::async_runtime::spawn_blocking(move || scrcpy::preview(&config))
+pub async fn preview_scrcpy(config: ScrcpyConfig) -> Result<ConfigPreview, LauncherError> {
+    tauri::async_runtime::spawn_blocking(move || scrcpy::inspect_config(&config))
         .await
         .map_err(|error| {
             LauncherError::new("internal_error", "Could not generate preview.")
                 .with_details(error.to_string())
-        })?
+        })
 }
 
 #[tauri::command]
